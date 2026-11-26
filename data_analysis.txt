@@ -1,0 +1,121 @@
+Data Analysis of csv file sales
+
+1. Check the file structure
+import pandas as pd
+df = pd.read_csv("sales.csv")
+df.shape
+df.head()
+df.columns.tolist()
+df.dtypes
+df.info()
+df.describe(include="all")
+
+Result: 1507 rows, 7 columns. Column names contain spaces, including a trailing space in Quantity. Numeric columns were read as text. Use snake_case names in the pipeline.
+
+2. Check missing values
+
+df.isna().sum()
+(df.isna().mean() * 100).round(2)
+df.isna().any(axis=1).sum()
+df[df.drop(columns="Discount").isna().any(axis=1)]
+df.tail(1)
+
+Result:
+Order ID: 0
+Region: 1
+Product: 1
+Quantity: 0
+Unit Price: 5
+Discount: 963
+Order Date: 1
+
+965 rows have at least one missing value.
+One row is a TOTAL row, not an order line. Remove it.
+Four actual order lines have missing unit prices. Check prices for the same product.
+Replace missing discounts with 0 (no discount).
+
+3. Check duplicates
+
+df.duplicated().sum()
+df[df.duplicated(keep=False)].sort_values("Order ID")
+df.duplicated(subset=["Order ID"]).sum()
+df[df.duplicated(subset=["Order ID"], keep=False)].sort_values("Order ID")
+df.drop_duplicates().shape
+
+Result: 5 redundant rows (10 rows involved), no additional repeated order IDs with different data.
+Assume identical rows are export duplicates. Keep the first occurrence. Do not remove rows based only on Order ID.
+1502 rows after removing exact duplicates.
+
+4. Check numeric columns
+
+for col in ["Quantity ", "Unit Price", "Discount"]:
+    numeric = pd.to_numeric(df[col], errors="coerce")
+    invalid = df[col].notna() & numeric.isna()
+    print(col)
+    print(df.loc[invalid, col].value_counts())
+
+df[df["Quantity "].str.contains(" ", na=False)]
+df[df["Unit Price"].str.contains(",", na=False)]
+df[df["Order ID"] == "Order ID"]
+
+Result: 4 order lines with spaces as thousands separators in quantity, 7 prices with decimal commas, 1 repeated header row. The raw quantity space check also finds the repeated header.
+Remove spaces from quantity, replace decimal commas with dots and remove the repeated header.
+
+quantity = pd.to_numeric(df["Quantity "].str.replace(" ", "", regex=False), errors="coerce")
+df[quantity < 0]
+
+Result: 6 rows with negative quantities. Assume these are product returns and keep them to calculate net revenue.
+
+5. Check prices per product
+
+temp = df.copy()
+temp = temp[~temp["Order ID"].isin(["TOTAL", "Order ID"])]
+temp["Unit Price"] = pd.to_numeric(temp["Unit Price"].str.replace(",", ".", regex=False), errors="coerce")
+temp.groupby("Product")["Unit Price"].agg(["nunique", "min", "max"])
+
+Result: all 8 products have one unique known price.
+Fill missing prices using the known price for the same product:
+Printer paper: 21.00 (2 rows)
+Keyboard: 89.00 (2 rows)
+Assume missing prices are the same as other observed prices for that product.
+
+6. Check region and product names
+
+df["Region"].value_counts(dropna=False)
+temp = df[~df["Order ID"].isin(["TOTAL", "Order ID"])].copy()
+region = temp["Region"]
+(region != region.str.strip()).sum()
+(region.str.strip() != region.str.strip().str.title()).sum()
+(region != region.str.strip().str.title()).sum()
+temp["Region"].str.strip().str.title().value_counts()
+temp["Product"].value_counts(dropna=False)
+(temp["Product"] != temp["Product"].str.strip()).sum()
+
+Result: 8 rows with extra spaces, 10 rows with inconsistent letter case. 15 distinct rows to fix (3 have both problems).
+Use strip() and title() for region names. Expect 5 regions: North, South, East, West, Central.
+8 products, no extra spaces found in product names.
+
+7. Check order IDs and dates
+
+valid_ids = temp["Order ID"].str.fullmatch(r"SO-\d+")
+(~valid_ids).sum()
+dates = pd.to_datetime(temp["Order Date"], format="%Y-%m-%d", errors="coerce")
+dates.isna().sum()
+print(dates.min())
+print(dates.max())
+
+Result: no invalid order IDs or dates after excluding the two technical rows.
+Date range: 2026-01-02 to 2026-09-29.
+Convert order dates to datetime.
+
+8. Summary before building the pipeline
+
+Raw data: 1507 rows
+Remove 1 TOTAL row, 1 repeated header and 5 exact duplicates.
+Expected number of order lines after cleaning: 1500.
+Keep all remaining order lines, including negative quantities.
+Fill 959 missing discounts after removing duplicates and technical rows.
+Recover 4 missing unit prices.
+Calculate revenue = quantity * unit_price - discount and aggregate by region.
+
+Counts above refer to the raw data unless stated otherwise. Some issues overlap.
